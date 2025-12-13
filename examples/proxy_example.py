@@ -62,10 +62,6 @@ async def main() -> None:
 
     tab = browser.main_tab
 
-    # Enable Fetch domain to handle proxy authentication
-    # handleAuthRequests=True enables authRequired events
-    await tab.send(cdp.fetch.enable(handle_auth_requests=True))
-
     # Set up handler for proxy authentication challenges
     async def handle_auth_required(event: cdp.fetch.AuthRequired) -> None:
         """Handle proxy authentication challenge (HTTP 407)"""
@@ -82,14 +78,21 @@ async def main() -> None:
 
     # Set up handler for paused requests (continue them normally)
     async def handle_request_paused(event: cdp.fetch.RequestPaused) -> None:
-        """Continue paused requests"""
-        # Only continue if there's no auth challenge
-        if not hasattr(event, "auth_challenge") or event.response_status_code != 407:
-            await tab.send(cdp.fetch.continue_request(event.request_id))
+        """Continue paused requests that are not auth challenges"""
+        # RequestPaused is fired for intercepted requests
+        # We need to continue them, auth challenges are handled by AuthRequired
+        try:
+            await tab.send(cdp.fetch.continue_request(request_id=event.request_id))
+        except Exception as e:
+            print(f"Error continuing request: {e}")
 
-    # Register event handlers
+    # Register event handlers BEFORE enabling fetch
     tab.add_handler(cdp.fetch.AuthRequired, handle_auth_required)
     tab.add_handler(cdp.fetch.RequestPaused, handle_request_paused)
+
+    # Enable Fetch domain to handle proxy authentication
+    # handleAuthRequests=True enables authRequired events for 401/407 responses
+    await tab.send(cdp.fetch.enable(handle_auth_requests=True))
 
     # Navigate to a page to test the proxy
     # Using httpbin to verify our IP and headers
