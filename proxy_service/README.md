@@ -205,20 +205,22 @@ python proxy_service/main.py
 在 `main.py` 中可以修改以下配置：
 
 ```python
-MAX_CONCURRENT = 5      # 最大并发数
-DEFAULT_TIMEOUT = 30    # 默认超时时间（秒）
-HEADLESS = False        # 是否使用无头模式
+MAX_CONCURRENT = 32                    # 最大并发数
+DEFAULT_TIMEOUT = 30                   # 默认超时时间（秒）
+HEADLESS = False                       # 是否使用无头模式
+BROWSER_EXECUTABLE_PATH = "/usr/local/bin/google-chrome"  # 浏览器可执行文件路径
 ```
 
 ### 配置说明
 
-- **MAX_CONCURRENT**: 最大并发请求数，根据服务器性能调整
-- **DEFAULT_TIMEOUT**: 默认请求超时时间（秒）
+- **MAX_CONCURRENT**: 最大并发请求数，根据服务器性能调整（默认 32）
+- **DEFAULT_TIMEOUT**: 默认请求超时时间（秒），默认 30
 - **HEADLESS**: 
   - `True` - 无头模式，不显示浏览器窗口，适合生产环境
   - `False` - 有界面模式，需要显示服务器支持
     - 本地开发：直接使用
     - 服务器环境：需要安装并启动 Xvfb 虚拟显示（见上方安装说明）
+- **BROWSER_EXECUTABLE_PATH**: Chrome/Chromium 浏览器可执行文件路径，默认 `/usr/local/bin/google-chrome`
 
 ## API 文档
 
@@ -436,6 +438,59 @@ curl "http://localhost:8000/health"
 }
 ```
 
+### 6. 详细健康检查 - `GET /health/detail`
+
+获取服务的详细健康状态信息，包括信号量状态、浏览器状态等，用于诊断服务问题。
+
+#### 请求示例
+
+```bash
+curl "http://localhost:8000/health/detail"
+```
+
+#### 响应示例
+
+```json
+{
+  "healthy": true,
+  "issues": [],
+  "semaphore": {
+    "total": 32,
+    "available": 28,
+    "in_use": 4
+  },
+  "browsers": [
+    {
+      "proxy": null,
+      "tabs": 2
+    },
+    {
+      "proxy": "http://proxy.example.com:8080",
+      "tabs": 1
+    }
+  ],
+  "config": {
+    "max_concurrent": 32,
+    "headless": false,
+    "browser_max_age": 3600,
+    "health_check_interval": 60
+  }
+}
+```
+
+#### 响应字段说明
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `healthy` | boolean | 服务是否健康 |
+| `issues` | array | 问题列表（如果有） |
+| `semaphore` | object | 信号量状态信息 |
+| `semaphore.total` | integer | 信号量总数 |
+| `semaphore.available` | integer | 可用信号量数 |
+| `semaphore.in_use` | integer | 使用中的信号量数 |
+| `browsers` | array | 浏览器实例列表 |
+| `config` | object | 服务配置信息 |
+
 ## 使用示例
 
 ### Python 示例
@@ -567,7 +622,7 @@ curl -X DELETE "http://localhost:8000/cookies?domain=example.com"
 
 ## 注意事项
 
-1. **并发限制**：默认最大并发数为 5，可根据服务器性能调整
+1. **并发限制**：默认最大并发数为 32，可根据服务器性能调整
 2. **超时设置**：建议根据目标网站响应速度设置合适的超时时间
 3. **代理认证**：使用带认证的代理时，确保用户名和密码正确
 4. **Cloudflare 验证**：某些复杂的 Cloudflare 挑战可能无法自动解决
