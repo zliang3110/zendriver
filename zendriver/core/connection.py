@@ -689,11 +689,19 @@ class Connection(metaclass=CantTouchThis):
 
 
 class Listener:
+    # Maximum number of event transactions to keep in mapper before cleanup
+    MAX_EVENT_TRANSACTIONS = 10000
+    # Cleanup threshold - when mapper exceeds this, trigger cleanup
+    CLEANUP_THRESHOLD = 8000
+
     def __init__(self, connection: Connection):
         self.connection = connection
         self.history: collections.deque[Any] = collections.deque()
         self.max_history = 1000
         self.task: asyncio.Future[None] | None = None
+        self._event_transaction_ids: collections.deque[int] = collections.deque(
+            maxlen=self.MAX_EVENT_TRANSACTIONS
+        )
 
         # when in interactive mode, the loop is paused after each return
         # and when the next call is made, it might still have to process some events
@@ -799,6 +807,10 @@ class Listener:
                         self.connection.__count__ = itertools.count(0)
                     event_tx.id = next(self.connection.__count__)
                     self.connection.mapper[event_tx.id] = event_tx
+                    # Track event transaction IDs for cleanup
+                    self._event_transaction_ids.append(event_tx.id)
+                    # Cleanup old event transactions to prevent memory leak
+                    self._cleanup_old_event_transactions()
                 except Exception as e:
                     logger.info(
                         "%s: %s  during parsing of json from event : %s"
@@ -849,6 +861,39 @@ class Listener:
                 except Exception:
                     raise
                 continue
+
+    def _cleanup_old_event_transactions(self) -> None:
+        """
+        Clean up old event transactions from the mapper to prevent memory leak.
+        This is called periodically during the listener loop.
+        """
+        # Only cleanup when we exceed the threshold
+        if len(self._event_transaction_ids) < self.CLEANUP_THRESHOLD:
+            return
+
+        # Calculate how many to remove (keep the most recent ones)
+        num_to_remove = len(self._event_transaction_ids) - self.CLEANUP_THRESHOLD // 2
+        if num_to_remove <= 0:
+            return
+
+        removed_count = 0
+        for _ in range(num_to_remove):
+            if not self._event_transaction_ids:
+                break
+            try:
+                old_id = self._event_transaction_ids.popleft()
+                if old_id in self.connection.mapper:
+                    del self.connection.mapper[old_id]
+                    removed_count += 1
+            except (KeyError, IndexError):
+                continue
+
+        if removed_count > 0:
+            logger.debug(
+                "Cleaned up %d old event transactions from mapper (current size: %d)",
+                removed_count,
+                len(self.connection.mapper),
+            )
 
     def __repr__(self) -> str:
         s_idle = "[idle]" if self.idle.is_set() else "[busy]"
